@@ -2,19 +2,19 @@
 		<li class="item clear">
 			<span class="pct80"><?php _e('Average page generation time' ); ?></span><span class="comments pct20"><?php echo $content->static_cache_average; ?> sec.</span>
 		</li>
-		
+
 		<li class="item clear">
 			<span class="pct80"><?php _e( 'Total number of pages cached' ); ?></span><span class="comments pct20"><?php echo $content->static_cache_pages; ?></span>
 		</li>
-		
+
 		<li class="item clear">
 			<span class="pct80"><?php _e( 'Hits' ); ?></span><span class="comments pct20"><?php echo $content->static_cache_hits; ?> (<?php echo $content->static_cache_hits_pct; ?>%)</span>
 		</li>
-		
+
 		<li class="item clear">
 			<span class="pct80"><?php _e( 'Misses' ); ?></span><span class="comments pct20"><?php echo $content->static_cache_misses; ?> (<?php echo $content->static_cache_misses_pct; ?>%)</span>
 		</li>
-		
+
 		<li class="item clear">
 			<script type="text/javascript">
 			/* <![CDATA[ */
@@ -23,11 +23,12 @@
 				spinner.start();
 				$.get(
 					url,
+					'',
 					function( json ) {
 						spinner.stop();
 						humanMsg.displayMsg( json );
 						$('.static-cache-module .item .pct20').each(function() {
-							$(this).html('0'); 
+							$(this).html('0');
 						});
 					},
 					'json'

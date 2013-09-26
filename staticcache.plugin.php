@@ -1,6 +1,6 @@
 <?php
 
-namespace Habari;
+#namespace Habari;
 
 /**
  * @package staticcache
@@ -13,14 +13,14 @@ class StaticCache extends Plugin
 {
 	const VERSION = 0.3;
 	const API_VERSION = 004;
-	
+
 	const GZ_COMPRESSION = 4;
 	const EXPIRE = 86400;
 	const EXPIRE_STATS = 604800;
-	
+
 	const GROUP_NAME = 'staticcache';
 	const STATS_GROUP_NAME = 'staticcache_stats';
-	
+
 	/**
 	 * Set a priority of 1 on action_init so we run first
 	 *
@@ -32,7 +32,7 @@ class StaticCache extends Plugin
 			'action_init' => 1
 			);
 	}
-	
+
 	/**
 	 * Create aliases to additional hooks
 	 *
@@ -51,7 +51,7 @@ class StaticCache extends Plugin
 			)
 		);
 	}
-	
+
 	/**
 	 * Serves the cache page or starts the output buffer. Ignore URLs matching
 	 * the ignore list, and ignores if there are session messages.
@@ -70,9 +70,9 @@ class StaticCache extends Plugin
 			'staticcache_ignore',
 			explode(',', Options::get('staticcache__ignore_list' ))
 		);
-		
+
 		// sanitize the ignore list for preg_match
-		$ignore_list = implode( 
+		$ignore_list = implode(
 			'|',
 			array_map(
 				create_function('$a', 'return preg_quote(trim($a), "@");'),
@@ -81,23 +81,23 @@ class StaticCache extends Plugin
 		);
 		$request = Site::get_url('host') . $_SERVER['REQUEST_URI'];
 		$request_method = $_SERVER['REQUEST_METHOD'];
-		
-		/* don't cache PUT or POST requests, pages matching ignore list keywords, 
+
+		/* don't cache PUT or POST requests, pages matching ignore list keywords,
 		 * nor pages with session messages
 		 */
 		if ( $request_method == 'PUT' || $request_method == 'POST'
 			|| preg_match("@.*($ignore_list).*@i", $request) || Session::has_messages() ) {
 			return;
 		}
-		
+
 		$request_id = self::get_request_id();
 		$query_id = self::get_query_id();
-		
+
 		if ( Cache::has(array(self::GROUP_NAME, $request_id)) ) {
 			$cache = Cache::get( array(self::GROUP_NAME, $request_id) );
 			if ( isset( $cache[$query_id] ) ) {
 				global $profile_start;
-				
+
 				// send the cached headers
 				foreach( $cache[$query_id]['headers'] as $header ) {
 					header($header);
@@ -120,7 +120,7 @@ class StaticCache extends Plugin
 		Plugins::register(array('StaticCache', 'store_final_output'), 'filter', 'final_output', 16);
 		//ob_start('StaticCache_ob_end_flush');
 	}
-	
+
 	/**
 	 * Record StaticCaches stats in the cache itself to avoid DB writes.
 	 * Data includes hits, misses, and avg.
@@ -148,7 +148,7 @@ class StaticCache extends Plugin
 				break;
 		}
 	}
-	
+
 	/**
 	 * Add the Static Cache dashboard module
 	 *
@@ -161,7 +161,7 @@ class StaticCache extends Plugin
 		$this->add_template( 'dashboard.block.staticcache', dirname( __FILE__ ) . '/dashboard.block.staticcache.php' );
 		return $block_list;
 	}
-	
+
 	/**
 	 * Filters the static cache dash module to add the theme template output.
 	 *
@@ -173,7 +173,7 @@ class StaticCache extends Plugin
 	{
 		$block->static_cache_average = sprintf( '%.4f', Cache::get(array(self::STATS_GROUP_NAME, 'avg')) );
 		$block->static_cache_pages = count(Cache::get_group(self::GROUP_NAME));
-		
+
 		$hits = Cache::get(array(self::STATS_GROUP_NAME, 'hits'));
 		$misses = Cache::get(array(self::STATS_GROUP_NAME, 'misses'));
 		$total = $hits + $misses;
@@ -182,22 +182,29 @@ class StaticCache extends Plugin
 		$block->static_cache_hits = $hits;
 		$block->static_cache_misses = $misses;
 	}
-	
+
 	/**
 	 * Ajax entry point for the 'clear cache data' action. Clears all stats and cache data
 	 * and outputs a JSON encoded string message.
 	 */
 	public function action_auth_ajax_clear_staticcache()
 	{
-		foreach ( Cache::get_group(self::GROUP_NAME) as $name => $data ) {
-			Cache::expire( array(self::GROUP_NAME, $name) );
+		if ( Options::get('staticcache__cache_method') == 'htaccess' ) {
+			array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/*/index.*" ) );
+			array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/index.*" ) );
+			array_map( 'rmdir', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/*") );
+		} else {
+			foreach ( Cache::get_group(self::GROUP_NAME) as $name => $data ) {
+				Cache::expire( array(self::GROUP_NAME, $name) );
+			}
+			foreach ( Cache::get_group(self::STATS_GROUP_NAME) as $name => $data ) {
+				Cache::expire( array(self::STATS_GROUP_NAME, $name) );
+			}
 		}
-		foreach ( Cache::get_group(self::STATS_GROUP_NAME) as $name => $data ) {
-			Cache::expire( array(self::STATS_GROUP_NAME, $name) );
-		}
+
 		echo json_encode(_t( "Cleared Static Cache's cache" ) );
 	}
-	
+
 	/**
 	 * Invalidates (expires) the cache entries for the give list of URLs.
 	 *
@@ -205,21 +212,36 @@ class StaticCache extends Plugin
 	 */
 	public function cache_invalidate( array $urls )
 	{
-		// account for annonymous user (id=0)
-		$user_ids = array_map( create_function('$a', 'return $a->id;'), Users::get_all()->getArrayCopy() );
-		array_push($user_ids, "0");
-		
-		// expire the urls for each user id
-		foreach ( $user_ids as $user_id ) {
+		if ( Options::get( Options::get('staticcache__cache_method') == 'htaccess' ) ) {
+			# Delete files
 			foreach( $urls as $url ) {
-				$request_id = self::get_request_id( $user_id, $url );
-				if ( Cache::has(array(self::GROUP_NAME, $request_id)) ) {
-					Cache::expire(array(self::GROUP_NAME, $request_id));
+				# convert URL to file path
+				$file = preg_replace( '#^http(s)?://#', '', $url );
+
+				if ( file_exists( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $file ) ) {
+					array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $file . "/index.*" ) );
+					@rmdir( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . '/' . $file . '/' );
 				}
 			}
 		}
+		else {
+			// account for annonymous user (id=0)
+			$user_ids = array_map( create_function('$a', 'return $a->id;'), Users::get_all()->getArrayCopy() );
+			array_push($user_ids, "0");
+
+			// expire the urls for each user id
+			foreach ( $user_ids as $user_id ) {
+				foreach( $urls as $url ) {
+					$request_id = self::get_request_id( $user_id, $url );
+					if ( Cache::has(array(self::GROUP_NAME, $request_id)) ) {
+						Cache::expire(array(self::GROUP_NAME, $request_id));
+					}
+				}
+			}
+		}
+
 	}
-	
+
 	/**
 	 * Clears cache for the given post after it's updated. includes all CRUD operations.
 	 *
@@ -236,7 +258,7 @@ class StaticCache extends Plugin
 			);
 		$this->cache_invalidate($urls);
 	}
-	
+
 	/**
 	 * Clears cache for the given comments parent post after it's updated. includes all
 	 * CRUD operations.
@@ -254,16 +276,18 @@ class StaticCache extends Plugin
 			);
 		$this->cache_invalidate($urls);
 	}
-	
+
 	/**
 	 * Setup the initial ignore list on activation. Ignores URLs matching the following:
 	 * /admin, /feedback, /user, /ajax, /auth_ajax, and ?nocache
+	 *
 	 */
 	public function action_plugin_activation()
 	{
 		Options::set('staticcache__ignore_list', '/admin,/feedback,/user,/ajax,/auth_ajax,?nocache');
+
 	}
-	
+
 	/**
 	 * Adds a 'configure' action to the pllugin page.
 	 *
@@ -278,7 +302,7 @@ class StaticCache extends Plugin
 		}
 		return $actions;
 	}
-	
+
 	/**
 	 * Adds the configure UI
 	 *
@@ -292,17 +316,18 @@ class StaticCache extends Plugin
 			switch ( $action ) {
 				case _t('Configure', 'staticcache') :
 					$ui = new FormUI('staticcache');
-					
+
+					$ui->append('radio', 'cache_method', 'staticcache__cache_method', _t('Cache Method: '), array( 'htaccess' => _t('Use mod_rewrite to serve cache files. (Recommended)'), 'habari' => _t('Use PHP/Habari to serve cache files.') ) );
 					$ignore = $ui->append('textarea', 'ignore', 'staticcache__ignore_list', _t('Do not cache any URI\'s matching these keywords (comma seperated): ', 'staticcache'));
 					$ignore->add_validator('validate_required');
-					
+
 					$expire = $ui->append('text', 'expire', 'staticcache__expire', _t('Cache expiry (in seconds): ', 'staticcache'));
 					$expire->add_validator('validate_required');
-					
+
 					if ( extension_loaded('zlib') ) {
 						$compress = $ui->append('checkbox', 'compress', 'staticcache__compress', _t('Compress Cache To Save Space: ', 'staticcache'));
 					}
-					
+
 					$ui->append('submit', 'save', _t('Save', 'staticcache'));
 					$ui->on_success( array( $this, 'save_config_msg' ) );
 					$ui->out();
@@ -313,11 +338,20 @@ class StaticCache extends Plugin
 
     public static function save_config_msg( $ui )
 	{
+		# If mod_rewrite is selected when saving options, create the cache dir
+		# if it doesn't already exist.
+		$cache_path = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . '/';
+		if ( $ui->controls['cache_method']->value == 'htaccess' && ! file_exists( $cache_path ) ) {
+			mkdir( $cache_path, 0755, true );
+		}
+		Utils::debug( $_SERVER['REQUEST_URI'] );
+				Utils::debug( Options::get('staticcache__cache_method') );
+
 		$ui->save();
 		Session::notice( _t( 'Options saved' ) );
 		return false;
 	}
-	
+
 	/**
 	 * Adds the plugin to the update check routine.
 	 */
@@ -325,7 +359,7 @@ class StaticCache extends Plugin
 	{
 		Update::add('StaticCache', '340fb135-e1a1-4351-a81c-dac2f1795169',  self::VERSION);
 	}
-	
+
 	/**
 	 * gets a unique id for the current query string requested.
 	 *
@@ -335,7 +369,7 @@ class StaticCache extends Plugin
 	{
 		return crc32(parse_url(Site::get_url('host') . $_SERVER['REQUEST_URI'], PHP_URL_QUERY));
 	}
-	
+
 	/**
 	 * Gets a unique id for the given request URL and user id.
 	 *
@@ -368,10 +402,18 @@ class StaticCache extends Plugin
 		if ( !URL::get_matched_rule() || URL::get_matched_rule()->name == 'display_404' ) {
 			return $buffer;
 		}
+
+		$buffer = ( Options::get('staticcache__cache_method') == 'htaccess' ) ? self::store_final_output_modrewrite( $buffer ) : self::store_final_output_habari( $buffer );
+
+		return $buffer;
+	}
+
+	public static function store_final_output_habari( $buffer )
+	{
 		$request_id = StaticCache::get_request_id();
 		$query_id = StaticCache::get_query_id();
 		$expire = Options::get('staticcache__expire') ? (int) Options::get('staticcache__expire') : StaticCache::EXPIRE;
-		
+
 		// get cache if exists
 		if ( Cache::has(array(StaticCache::GROUP_NAME, $request_id)) ) {
 			$cache = Cache::get(array(StaticCache::GROUP_NAME, $request_id));
@@ -379,7 +421,7 @@ class StaticCache extends Plugin
 		else {
 			$cache = array();
 		}
-		
+
 		// see if we want compression and store cache
 		$cache[$query_id] = array(
 			'headers' => headers_list(),
@@ -394,7 +436,37 @@ class StaticCache extends Plugin
 			$cache[$query_id]['compressed'] = false;
 		}
 		Cache::set( array(StaticCache::GROUP_NAME, $request_id), $cache, $expire );
-		
+		return $buffer;
+	}
+
+	/**
+	 * The output buffer callback used to capture the output and cache it for use
+	 * with mod_rewrite.
+	 *
+	 * @see StaticCache::init()
+	 * @param string $buffer The output buffer contents
+	 * @return string $buffer unchanged
+	 */
+	public static function store_final_output_modrewrite( $buffer )
+	{
+		# Create the post directory if it doesn't exist
+		$cache_path = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . $_SERVER['REQUEST_URI'];
+		if ( ! file_exists( $cache_path ) ) {
+			mkdir( $cache_path, 0755, true );
+		}
+
+		$buffer .= '<!-- Cached page generated by StaticCache on ' . date( "Y-m-d H:i:s", time() ) . ' -->';
+
+		$filename = ( strpos( $cache_path, '/atom/' ) ) ? 'index.xml' : 'index.html';
+
+		# Write out content to index.html
+		file_put_contents( $cache_path . '/' . $filename, $buffer, LOCK_EX);
+
+		# Save a compressed copy too
+		if ( Options::get( 'staticcache__compress' ) && extension_loaded( 'zlib' ) ) {
+			file_put_contents( $cache_path . '/' . $filename . '.gz', gzcompress( $buffer, StaticCache::GZ_COMPRESSION ), LOCK_EX );
+		}
+
 		return $buffer;
 	}
 

@@ -279,12 +279,12 @@ class StaticCache extends Plugin
 
 	/**
 	 * Setup the initial ignore list on activation. Ignores URLs matching the following:
-	 * /admin, /feedback, /user, /ajax, /auth_ajax, and ?nocache
+	 * /admin, /feedback, /user, /ajax, /auth_ajax, ?nocache, /auth and /cron.
 	 *
 	 */
 	public function action_plugin_activation()
 	{
-		Options::set('staticcache__ignore_list', '/admin,/feedback,/user,/ajax,/auth_ajax,?nocache');
+		Options::set('staticcache__ignore_list', '/admin,/feedback,/user,/ajax,/auth_ajax,?nocache,/auth,/cron');
 
 	}
 

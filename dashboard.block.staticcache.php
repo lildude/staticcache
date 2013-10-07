@@ -1,4 +1,9 @@
 	<ul class="items">
+	<?php if ( Options::get('staticcache__cache_method') == 'htaccess' ) : ?>
+		<li class="item clear">
+		<span class="pct100"><?php _e( 'Statistics not avaible with mod_rewrite caching.' ); ?></span>
+		</li>
+	<?php else : ?>	
 		<li class="item clear">
 			<span class="pct80"><?php _e('Average page generation time' ); ?></span><span class="comments pct20"><?php echo $content->static_cache_average; ?> sec.</span>
 		</li>
@@ -14,7 +19,7 @@
 		<li class="item clear">
 			<span class="pct80"><?php _e( 'Misses' ); ?></span><span class="comments pct20"><?php echo $content->static_cache_misses; ?> (<?php echo $content->static_cache_misses_pct; ?>%)</span>
 		</li>
-
+	<?php endif; ?>
 		<li class="item clear">
 			<script type="text/javascript">
 			/* <![CDATA[ */

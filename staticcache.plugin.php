@@ -171,16 +171,18 @@ class StaticCache extends Plugin
 	 */
 	public function action_block_content_staticcache( Block $block, Theme $theme )
 	{
-		$block->static_cache_average = sprintf( '%.4f', Cache::get(array(self::STATS_GROUP_NAME, 'avg')) );
-		$block->static_cache_pages = count(Cache::get_group(self::GROUP_NAME));
+		if ( Options::get('staticcache__cache_method') == 'habari' ) {
+			$block->static_cache_average = sprintf( '%.4f', Cache::get(array(self::STATS_GROUP_NAME, 'avg')) );
+			$block->static_cache_pages = count(Cache::get_group(self::GROUP_NAME));
 
-		$hits = Cache::get(array(self::STATS_GROUP_NAME, 'hits'));
-		$misses = Cache::get(array(self::STATS_GROUP_NAME, 'misses'));
-		$total = $hits + $misses;
-		$block->static_cache_hits_pct = sprintf('%.0f', $total > 0 ? ($hits/$total)*100 : 0);
-		$block->static_cache_misses_pct = sprintf('%.0f', $total > 0 ? ($misses/$total)*100 : 0);
-		$block->static_cache_hits = $hits;
-		$block->static_cache_misses = $misses;
+			$hits = Cache::get(array(self::STATS_GROUP_NAME, 'hits'));
+			$misses = Cache::get(array(self::STATS_GROUP_NAME, 'misses'));
+			$total = $hits + $misses;
+			$block->static_cache_hits_pct = sprintf('%.0f', $total > 0 ? ($hits/$total)*100 : 0);
+			$block->static_cache_misses_pct = sprintf('%.0f', $total > 0 ? ($misses/$total)*100 : 0);
+			$block->static_cache_hits = $hits;
+			$block->static_cache_misses = $misses;
+		}
 	}
 
 	/**
@@ -189,11 +191,24 @@ class StaticCache extends Plugin
 	 */
 	public function action_auth_ajax_clear_staticcache()
 	{
+		self::clear_staticcache();
+		echo json_encode(_t( "Cleared Static Cache's cache" ) );
+	}
+
+	/**
+	 * Function to clear out the entire cache
+	 *
+	 */
+	private static function clear_staticcache()
+	{
 		if ( Options::get('staticcache__cache_method') == 'htaccess' ) {
-			array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/*/index.*" ) );
-			array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/index.*" ) );
-			array_map( 'rmdir', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/*") );
-		} else {
+			@array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/*/index.*" ) );
+			@array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/index.*" ) );
+			@array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/index.*" ) );
+			@array_map( 'rmdir', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/*") );
+			@array_map( 'rmdir', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/*") );
+		} 
+		else {
 			foreach ( Cache::get_group(self::GROUP_NAME) as $name => $data ) {
 				Cache::expire( array(self::GROUP_NAME, $name) );
 			}
@@ -201,8 +216,7 @@ class StaticCache extends Plugin
 				Cache::expire( array(self::STATS_GROUP_NAME, $name) );
 			}
 		}
-
-		echo json_encode(_t( "Cleared Static Cache's cache" ) );
+		EventLog::log( _t( "Cleared cache" ), 'info' );
 	}
 
 	/**
@@ -212,7 +226,7 @@ class StaticCache extends Plugin
 	 */
 	public function cache_invalidate( array $urls )
 	{
-		if ( Options::get( Options::get('staticcache__cache_method') == 'htaccess' ) ) {
+		if ( Options::get('staticcache__cache_method') == 'htaccess' ) {
 			# Delete files
 			foreach( $urls as $url ) {
 				# convert URL to file path
@@ -220,7 +234,9 @@ class StaticCache extends Plugin
 
 				if ( file_exists( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $file ) ) {
 					array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $file . "/index.*" ) );
-					@rmdir( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . '/' . $file . '/' );
+					if ( $url != Site::get_url('habari') ) {
+						@rmdir( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $file . '/' );
+					}
 				}
 			}
 		}
@@ -268,13 +284,15 @@ class StaticCache extends Plugin
 	 */
 	public function action_comment_update_after( Comment $comment )
 	{
-		$urls = array(
-			$comment->post->comment_feed_link,
-			$comment->post->permalink,
-			URL::get('atom_feed', 'index=1'),
-			Site::get_url('habari')
-			);
-		$this->cache_invalidate($urls);
+		if ( $comment->status == Comment::STATUS_APPROVED ) {
+			$urls = array(
+				$comment->post->comment_feed_link,
+				$comment->post->permalink,
+				URL::get('atom_feed', 'index=1'),
+				Site::get_url('habari')
+				);
+			$this->cache_invalidate($urls);
+		}
 	}
 
 	/**
@@ -284,8 +302,9 @@ class StaticCache extends Plugin
 	 */
 	public function action_plugin_activation()
 	{
-		Options::set('staticcache__ignore_list', '/admin,/feedback,/user,/ajax,/auth_ajax,?nocache,/auth,/cron');
-
+		Options::set_group( 'staticcache', array( 'ignore_list' => '/admin,/feedback,/user,/ajax,/auth_ajax,?nocache,/auth,/cron',
+												  'cache_method' => 'habari',
+												  'expire' => 3600 ) );
 	}
 
 	/**
@@ -295,10 +314,11 @@ class StaticCache extends Plugin
 	 * @param strinf $plugin_id the plugins id
 	 * @return array the actions to add
 	 */
-	public function filter_plugin_config( array $actions, $plugin_id )
+	public function filter_plugin_config()
 	{
-		if ( $plugin_id == $this->plugin_id() ) {
-			$actions[]= _t('Configure', 'staticcache');
+		$actions['configure'] = _t( 'Configure', 'staticcache' );
+		if ( Options::get( 'staticcache__cache_method' ) == 'htaccess' ) {
+			$actions['htaccess'] = _t( 'Rewrite Rules' );
 		}
 		return $actions;
 	}
@@ -310,47 +330,67 @@ class StaticCache extends Plugin
 	 * @param string $plugin_id the plugins id
 	 * @param string $action the action being performed
 	 */
-	public function action_plugin_ui( $plugin_id, $action )
+	public function action_plugin_ui_configure()
 	{
-		if ( $plugin_id == $this->plugin_id() ) {
-			switch ( $action ) {
-				case _t('Configure', 'staticcache') :
-					$ui = new FormUI('staticcache');
+		$ui = new FormUI( 'staticcache' );
+		$ui->append( 'radio', 'cache_method', 'staticcache__cache_method', _t( 'Cache Method: ' ), array( 'htaccess' => _t( 'Use mod_rewrite to serve cache files. (Recommended)' ), 'habari' => _t( 'Use PHP/Habari to serve cache files.' ) ) );
+		$ignore = $ui->append( 'textarea', 'ignore', 'staticcache__ignore_list', _t( 'Do not cache any URI\'s matching these keywords (comma seperated): ', 'staticcache' ) );
+		$ignore->add_validator( 'validate_required' );
 
-					$ui->append('radio', 'cache_method', 'staticcache__cache_method', _t('Cache Method: '), array( 'htaccess' => _t('Use mod_rewrite to serve cache files. (Recommended)'), 'habari' => _t('Use PHP/Habari to serve cache files.') ) );
-					$ignore = $ui->append('textarea', 'ignore', 'staticcache__ignore_list', _t('Do not cache any URI\'s matching these keywords (comma seperated): ', 'staticcache'));
-					$ignore->add_validator('validate_required');
+		$expire = $ui->append( 'text', 'expire', 'staticcache__expire', _t( 'Cache expiry (in seconds): ', 'staticcache' ) );
+		$expire->add_validator( 'validate_required' );
 
-					$expire = $ui->append('text', 'expire', 'staticcache__expire', _t('Cache expiry (in seconds): ', 'staticcache'));
-					$expire->add_validator('validate_required');
-
-					if ( extension_loaded('zlib') ) {
-						$compress = $ui->append('checkbox', 'compress', 'staticcache__compress', _t('Compress Cache To Save Space: ', 'staticcache'));
-					}
-
-					$ui->append('submit', 'save', _t('Save', 'staticcache'));
-					$ui->on_success( array( $this, 'save_config_msg' ) );
-					$ui->out();
-					break;
-			}
+		if ( extension_loaded( 'zlib' ) ) {
+			$compress = $ui->append( 'checkbox', 'compress', 'staticcache__compress', _t( 'Compress Cache To Save Space: ', 'staticcache' ) );
 		}
+
+		$ui->append( 'submit', 'save', _t( 'Save', 'staticcache' ) );
+		$ui->on_success( array( $this, 'save_config_msg' ) );
+		$ui->out();
+	}
+
+	public function action_plugin_ui_htaccess()
+	{
+		$staticcache_content = self::staticcache_content();
+		$sc_contents = "\n" . implode( "\n", $staticcache_content ) . "\n";
+
+		$ui = new FormUI( 'staticcache' );
+		$ui->append( 'static', 'show_pre', '<div class="formcontrol"><button style="float: none;" onclick="javascript:$(\'#calcd_rules\').toggle(); return false;" class="link_as_button">View mod_rewrite rules</button></div>' );
+		$ui->append( 'static', 'style', '<style>#calcd_rules { border: 1px solid #ddd; padding: 5px; margin-top: 10px; background-color: #fff; display: none; font-family: courier, monospace; overflow: auto; }</style>' );
+		$ui->append( 'static', 'pre', '<div class="formcontrol"><pre id="calcd_rules">' . $sc_contents . '</pre></div>' );
+		$ui->append( 'static', 'append', '<div class="formcontrol"><button style="float: none;" class="link_as_button">Update mod_rewrite rules</button></div>' );
+
+		### Compare to calculated rules
+
+
+		### 
+		$ui->out();
 	}
 
     public static function save_config_msg( $ui )
 	{
+		$ui->save();
 		# If mod_rewrite is selected when saving options, create the cache dir
 		# if it doesn't already exist.
 		$cache_path = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . '/';
-		if ( $ui->controls['cache_method']->value == 'htaccess' && ! file_exists( $cache_path ) ) {
-			mkdir( $cache_path, 0755, true );
-		}
-		Utils::debug( $_SERVER['REQUEST_URI'] );
-				Utils::debug( Options::get('staticcache__cache_method') );
+		if ( $ui->controls['cache_method']->value == 'htaccess' ) {
+			# Create our cache dir
+			if ( ! file_exists( $cache_path ) ) {
+				mkdir( $cache_path, 0755, true );
+			}
 
-		$ui->save();
+		}
+
+		$staticcache_content = self::staticcache_content();
+		$sc_contents = "\n" . implode( "\n", $staticcache_content ) . "\n";
+
+		Utils::debug($sc_contents);
+		
 		Session::notice( _t( 'Options saved' ) );
 		return false;
 	}
+
+
 
 	/**
 	 * Adds the plugin to the update check routine.
@@ -449,27 +489,145 @@ class StaticCache extends Plugin
 	 */
 	public static function store_final_output_modrewrite( $buffer )
 	{
+		# Don't cache if we're logged in - safest way to ensure admin data isn't cached.
+		if ( User::identify()->loggedin ) {
+			$buffer .= '<!-- Uncached -->';
+			return $buffer;
+		}
+
 		# Create the post directory if it doesn't exist
 		$cache_path = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . $_SERVER['REQUEST_URI'];
 		if ( ! file_exists( $cache_path ) ) {
 			mkdir( $cache_path, 0755, true );
 		}
 
-		$buffer .= '<!-- Cached page generated by StaticCache on ' . date( "Y-m-d H:i:s", time() ) . ' -->';
+		$cache_buffer = $buffer . '<!-- Cached page generated by StaticCache on ' . date( "Y-m-d H:i:s", time() ) . ' -->';
 
 		$filename = ( strpos( $cache_path, '/atom/' ) ) ? 'index.xml' : 'index.html';
 
 		# Write out content to index.html
-		file_put_contents( $cache_path . '/' . $filename, $buffer, LOCK_EX);
+		file_put_contents( $cache_path . '/' . $filename, $cache_buffer, LOCK_EX);
 
 		# Save a compressed copy too
 		if ( Options::get( 'staticcache__compress' ) && extension_loaded( 'zlib' ) ) {
-			file_put_contents( $cache_path . '/' . $filename . '.gz', gzcompress( $buffer, StaticCache::GZ_COMPRESSION ), LOCK_EX );
+			$cache_buffer .= "\n<!-- Compression: gzip -->";
+			$gz_data = gzencode( $cache_buffer, StaticCache::GZ_COMPRESSION );
+			file_put_contents( $cache_path . '/' . $filename . '.gz', $gz_data, LOCK_EX );
 		}
-
 		return $buffer;
 	}
 
+	/**
+	 * This function updates the main Habari .htaccess file and also creates
+	 * the .htaccess file in the cache directory.
+	 *
+	 */
+	/*
+	public static function write_htaccess()
+	{
+		if ( false === strpos( $_SERVER['SERVER_SOFTWARE'], 'Apache' ) ) {
+			// .htaccess is only needed on Apache
+			// @TODO: Notify people on other servers to take measures to secure the SQLite file.
+			return true;
+		}
+		$htaccess = HABARI_PATH . DIRECTORY_SEPARATOR . '.htaccess';
+		if ( !file_exists( $htaccess ) ) {
+			// no .htaccess to write to
+			return false;
+		}
+		if ( !is_writable( $htaccess ) ) {
+			// we can't update the file
+			return false;
+		}
+
+		// Get the files clause
+		$staticcache_content = self::staticcache_content();
+		$sc_contents = "\n" . implode( "\n", $staticcache_content ) . "\n";
+
+		// See if it already exists
+		$current_files_contents = file_get_contents( $file );
+		if ( false === strpos( $current_files_contents, $sc_contents ) ) {
+			// If not, add the rule to the beginning of the .htaccess file
+			if ( false === file_put_contents( $file, $sc_contents, $current_files_contents ) ) {
+				// Can't write to the file
+				return false;
+			}
+	
+		}
+		// Success!
+		return true;
+	}
+
+	/**
+	 * Rewrite rules that will be appended to the htaccess file
+	 *
+	 */
+	public static function staticcache_content()
+	{
+		$rewrite_base = trim( dirname( $_SERVER['SCRIPT_NAME'] ), '/\\' );
+		$contents = array(
+			'### STATICCACHE START',
+			'RewriteEngine On',
+			'RewriteBase /' . $rewrite_base,
+			'RewriteCond %{REQUEST_METHOD} !POST',
+			'RewriteCond %{QUERY_STRING} !.*=.*',
+			'RewriteCond %{HTTP:Cookie} !^.*staticcache_(logged_in|commenter).*$',
+			'RewriteCond %{HTTP:Accept-Encoding} gzip',
+			'RewriteCond ' . Site::get_dir( 'user' ) . '/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html.gz -f',
+			'RewriteRule ^(.*) "' . Site::get_dir( 'user' ) . '/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html.gz" [L]',
+			'',
+			'RewriteCond %{REQUEST_METHOD} !POST',
+			'RewriteCond %{QUERY_STRING} !.*=.*',
+			'RewriteCond %{HTTP:Cookie} !^.*staticcache_(logged_in|commenter).*$',
+			'RewriteCond ' . Site::get_dir( 'user' ) . '/user/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html -f',
+			'RewriteRule ^(.*) "' . Site::get_dir( 'user' ) . '/user/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html" [L]',
+			'### STATICCACHE END'
+		);
+
+		return $contents;
+	}
+
+
+	/**
+     * Set a login cookie.
+     *
+     * We do this so we can easily determine if we're logged in or not as we
+     * can't access the PHPSESSION vars.
+     * 
+     */
+    public function filter_user_authenticate( $user )
+    {
+        setcookie( 'staticcache_logged_in', true, time() + HabariDateTime::HOUR, Site::get_path( 'base', true ) );
+        return $user;
+    }
+    /**
+	 * Unset my login cookie
+	 */
+    public function action_user_logout()
+    {
+        setcookie( 'staticcache_logged_in', null, -1, Site::get_path( 'base', true ) );
+    }
+
+    /**
+     * Set a 24 hour cookie when a user comments so they get
+     * non-cached data whilst waiting for their comment to be
+     * approved
+     */
+    public function action_comment_accepted( $comment )
+    {
+    	if ( $comment->status == Comment::STATUS_UNAPPROVED ) {
+    		setcookie( 'staticcache_commenter', true, time() + HabariDateTime::DAY, Site::get_path( 'base', true ) );
+    	}
+    }
+
+    /**
+     * Clear cache when changing themes
+     *
+     */
+    public function action_theme_activated_any( )
+    {
+    	self::clear_staticcache();
+    }
 }
 
 

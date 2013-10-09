@@ -220,7 +220,7 @@ class StaticCache extends Plugin
 	}
 
 	/**
-	 * Invalidates (expires) the cache entries for the give list of URLs.
+	 * Invalidates (expires) the cache entries for the given list of URLs.
 	 *
 	 * @param array $urls An array of urls to clear
 	 */
@@ -334,11 +334,20 @@ class StaticCache extends Plugin
 	{
 		$ui = new FormUI( 'staticcache' );
 		$ui->append( 'radio', 'cache_method', 'staticcache__cache_method', _t( 'Cache Method: ' ), array( 'htaccess' => _t( 'Use mod_rewrite to serve cache files. (Recommended)' ), 'habari' => _t( 'Use PHP/Habari to serve cache files.' ) ) );
-		$ignore = $ui->append( 'textarea', 'ignore', 'staticcache__ignore_list', _t( 'Do not cache any URI\'s matching these keywords (comma seperated): ', 'staticcache' ) );
-		$ignore->add_validator( 'validate_required' );
-
-		$expire = $ui->append( 'text', 'expire', 'staticcache__expire', _t( 'Cache expiry (in seconds): ', 'staticcache' ) );
-		$expire->add_validator( 'validate_required' );
+			$ui->cache_method->helptext = _t( "If you are not using Apache or do not have a writeable .htaccess file, you'll need to manually update your rewrite rules with rules similar to these (change for other web servers)." );
+		$ui->append( 'textarea', 'ignore', 'staticcache__ignore_list', _t( 'Do not cache any URI\'s matching these keywords (comma seperated): ', 'staticcache' ) );
+			$ui->ignore->add_validator( 'validate_required' );
+		$ui->append( 'text', 'expire', 'staticcache__expire', _t( 'Cache expiry (in seconds): ', 'staticcache' ) );
+			$ui->expire->add_validator( 'validate_required' );
+		# TODO: Give the option for a custom interval
+		$ui->append( 'select', 'garbage_collect_int', 'staticcache__garbage_collect_int', _t( 'Garbage Collection Interval:' ),
+			array(
+				'none'		=> _t( 'Never' ),
+				'hourly'	=> _t( 'Hourly' ),
+				'daily' 	=> _t( 'Daily' ),
+				'weekly' 	=> _t( 'Weekly' ),
+				'monthly' 	=> _t( 'Monthly' ) ) );
+		$ui->garbage_collect_int->helptext = _t( 'This sets the frequency stale cached entries are cleaned from the cache.  Expired cache entries are not removed when they expire, hence the need for garbage collection.' );
 
 		if ( extension_loaded( 'zlib' ) ) {
 			$compress = $ui->append( 'checkbox', 'compress', 'staticcache__compress', _t( 'Compress Cache To Save Space: ', 'staticcache' ) );
@@ -351,19 +360,31 @@ class StaticCache extends Plugin
 
 	public function action_plugin_ui_htaccess()
 	{
+		### Show calculated rewrite rules
 		$staticcache_content = self::staticcache_content();
 		$sc_contents = "\n" . implode( "\n", $staticcache_content ) . "\n";
+		$htaccess = HABARI_PATH . DIRECTORY_SEPARATOR . '.htaccess';
+		$gz_content = self::gzfile_htaccess_content();
+		$gzhtaccess = "\n" . implode( "\n", $gz_content ) . "\n";
 
 		$ui = new FormUI( 'staticcache' );
-		$ui->append( 'static', 'show_pre', '<div class="formcontrol"><button style="float: none;" onclick="javascript:$(\'#calcd_rules\').toggle(); return false;" class="link_as_button">View mod_rewrite rules</button></div>' );
-		$ui->append( 'static', 'style', '<style>#calcd_rules { border: 1px solid #ddd; padding: 5px; margin-top: 10px; background-color: #fff; display: none; font-family: courier, monospace; overflow: auto; }</style>' );
-		$ui->append( 'static', 'pre', '<div class="formcontrol"><pre id="calcd_rules">' . $sc_contents . '</pre></div>' );
+		$ui->append( 'static', 'show_pre', '<div class="formcontrol"><p>Static Cache requires rewrite rules for the mod_rewrite method of caching. <button style="float: none;" onclick="javascript:$(\'#calcd_rules\').toggle(); return false;" class="link_as_button">View mod_rewrite rules</button></p></div>' );
+		$ui->append( 'static', 'style', '<style>#calcd_rules { display: none; } .rules_box { border: 1px solid #ddd; padding: 5px; margin-top: 10px; background-color: #fff; font-family: courier, monospace; overflow: auto; }</style>' );
+		$ui->append( 'static', 'pre', '<div class="formcontrol">
+			<div id="calcd_rules">
+				<h3>' . $htaccess . '</h3>
+				<pre class="rules_box">' . $sc_contents . '</pre>
+				<br /><h3>' . HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/.htaccess</h3>
+				<pre class="rules_box">' . htmlentities( $gzhtaccess ) . '</pre>
+			</div></div>' );
 		$ui->append( 'static', 'append', '<div class="formcontrol"><button style="float: none;" class="link_as_button">Update mod_rewrite rules</button></div>' );
 
 		### Compare to calculated rules
 
 
 		### 
+		#$ui->append( 'submit', 'save', _t( 'Save', 'staticcache' ) );
+		#$ui->on_success( array( $this, 'update_htaccess' ) );
 		$ui->out();
 	}
 
@@ -378,26 +399,49 @@ class StaticCache extends Plugin
 			if ( ! file_exists( $cache_path ) ) {
 				mkdir( $cache_path, 0755, true );
 			}
+			# Update the .htaccess file
+			# TODO: Make sure it is writeable else display message.
+			self::write_htaccess( self::staticcache_content() );
 
+			# Write the cache .htaccess so our gz files can be accessed directly too
+			if ( $ui->controls['compress']->value == 1 ) {
+				$cache_path = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/';
+				if ( ! file_exists( $cache_path . '.htaccess' ) ) {
+					$rules = self::gzfile_htaccess_content();
+					# create our file as it doesn't exist
+					touch( $cache_path . '.htaccess' );
+					self::write_htaccess( $rules, $cache_path . '.htaccess' );
+				}
+			}
 		}
 
-		$staticcache_content = self::staticcache_content();
-		$sc_contents = "\n" . implode( "\n", $staticcache_content ) . "\n";
-
-		Utils::debug($sc_contents);
+		# Remove any other instances of this cronjob
+		Crontab::delete_cronjob( 'StaticCache Garbage Collection' );
+		# Add our garbage collection cronjob
+		if ( $ui->controls['garbage_collect_int'] != 'never' ) {
+			call_user_func_array( array( 'Crontab', 'add_' . $ui->controls['garbage_collect_int'] . '_cron' ), array( 'StaticCache Garbage Collection', array( 'StaticCache', 'garbage_collection' ), 'Clean up stale cache entries.' ) ); 
+		}
+		
 		
 		Session::notice( _t( 'Options saved' ) );
 		return false;
 	}
 
+	/**
+	 * Write our rewrite rules to .htaccess if they don't exist
+	 *
+	 */
+	public static function update_htaccess()
+	{
 
+	}
 
 	/**
 	 * Adds the plugin to the update check routine.
 	 */
 	public function action_update_check()
 	{
-		Update::add('StaticCache', '340fb135-e1a1-4351-a81c-dac2f1795169',  self::VERSION);
+		Update::add( 'StaticCache', '340fb135-e1a1-4351-a81c-dac2f1795169',  self::VERSION );
 	}
 
 	/**
@@ -521,16 +565,19 @@ class StaticCache extends Plugin
 	 * This function updates the main Habari .htaccess file and also creates
 	 * the .htaccess file in the cache directory.
 	 *
+	 * @param array $rules An array of rules you wish to add to the beginning of the htaccess file. Each element represents a new rule.
+	 * @param string $file Path to the .htaccess file to update. Default is the HABARI_PATH/.htaccess.
+	 *
 	 */
-	/*
-	public static function write_htaccess()
+	public static function write_htaccess( $rules = array(), $file = null )
 	{
 		if ( false === strpos( $_SERVER['SERVER_SOFTWARE'], 'Apache' ) ) {
 			// .htaccess is only needed on Apache
 			// @TODO: Notify people on other servers to take measures to secure the SQLite file.
 			return true;
 		}
-		$htaccess = HABARI_PATH . DIRECTORY_SEPARATOR . '.htaccess';
+
+		$htaccess = ( is_null( $file ) ) ? HABARI_PATH . DIRECTORY_SEPARATOR . '.htaccess' : $file;
 		if ( !file_exists( $htaccess ) ) {
 			// no .htaccess to write to
 			return false;
@@ -541,14 +588,15 @@ class StaticCache extends Plugin
 		}
 
 		// Get the files clause
-		$staticcache_content = self::staticcache_content();
-		$sc_contents = "\n" . implode( "\n", $staticcache_content ) . "\n";
+		#$staticcache_content = self::staticcache_content();
+		#$sc_contents = "\n" . implode( "\n", $staticcache_content ) . "\n";
+		$rules = "\n" . implode( "\n", $rules ) . "\n";
 
 		// See if it already exists
-		$current_files_contents = file_get_contents( $file );
-		if ( false === strpos( $current_files_contents, $sc_contents ) ) {
+		$current_file_contents = file_get_contents( $htaccess );
+		if ( false === strpos( $current_file_contents, $rules ) ) {
 			// If not, add the rule to the beginning of the .htaccess file
-			if ( false === file_put_contents( $file, $sc_contents, $current_files_contents ) ) {
+			if ( false === file_put_contents( $htaccess, $rules . $current_file_contents ) ) {
 				// Can't write to the file
 				return false;
 			}
@@ -562,7 +610,7 @@ class StaticCache extends Plugin
 	 * Rewrite rules that will be appended to the htaccess file
 	 *
 	 */
-	public static function staticcache_content()
+	private static function staticcache_content()
 	{
 		$rewrite_base = trim( dirname( $_SERVER['SCRIPT_NAME'] ), '/\\' );
 		$contents = array(
@@ -585,6 +633,34 @@ class StaticCache extends Plugin
 		);
 
 		return $contents;
+	}
+
+	private static function gzfile_htaccess_content()
+	{
+		$rules = array(
+					'# BEGIN STATICCACHE',
+					'<IfModule mod_mime.c>',
+					'  <FilesMatch "\.html\.gz$">',
+					'    ForceType text/html',
+					'    FileETag None',
+					'  </FilesMatch>',
+					'  AddEncoding gzip .gz',
+					'  AddType text/html .gz',
+					'</IfModule>',
+					'<IfModule mod_deflate.c>',
+					'  SetEnvIfNoCase Request_URI \.gz$ no-gzip',
+					'</IfModule>',
+					'<IfModule mod_headers.c>',
+					'  Header set Vary "Accept-Encoding, Cookie"',
+					'  Header set Cache-Control "max-age=' . Options::get( 'staticcache__expire' ) . ', must-revalidate"',
+					'</IfModule>',
+					'<IfModule mod_expires.c>',
+					'  ExpiresActive On',
+					'  ExpiresByType text/html "modification plus ' . Options::get( 'staticcache__expire' ) . ' seconds"',
+					'</IfModule>',
+					'# END STATICCACHE'
+				);
+		return $rules;
 	}
 
 
@@ -627,6 +703,18 @@ class StaticCache extends Plugin
     public function action_theme_activated_any( )
     {
     	self::clear_staticcache();
+    }
+
+
+    /**
+     * Perform the garbage collection
+     *
+     * This goes through the cache and removes all entries that have expired.
+     *
+     */
+    public static function garbage_collection()
+    {
+    	return true;
     }
 }
 

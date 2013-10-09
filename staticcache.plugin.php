@@ -621,14 +621,14 @@ class StaticCache extends Plugin
 			'RewriteCond %{QUERY_STRING} !.*=.*',
 			'RewriteCond %{HTTP:Cookie} !^.*staticcache_(logged_in|commenter).*$',
 			'RewriteCond %{HTTP:Accept-Encoding} gzip',
-			'RewriteCond ' . Site::get_dir( 'user' ) . '/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html.gz -f',
-			'RewriteRule ^(.*) "' . Site::get_dir( 'user' ) . '/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html.gz" [L]',
+			'RewriteCond ' . Site::get_dir( 'config' ) . '/user/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html.gz -f',
+			'RewriteRule ^(.*) "' . Site::get_dir( 'config' ) . '/user/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html.gz" [L]',
 			'',
 			'RewriteCond %{REQUEST_METHOD} !POST',
 			'RewriteCond %{QUERY_STRING} !.*=.*',
 			'RewriteCond %{HTTP:Cookie} !^.*staticcache_(logged_in|commenter).*$',
-			'RewriteCond ' . Site::get_dir( 'user' ) . '/user/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html -f',
-			'RewriteRule ^(.*) "' . Site::get_dir( 'user' ) . '/user/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html" [L]',
+			'RewriteCond ' . Site::get_dir( 'config' ) . '/user/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html -f',
+			'RewriteRule ^(.*) "' . Site::get_dir( 'config' ) . '/user/cache/staticcache/%{SERVER_NAME}' . Site::get_path( 'habari' ) . '/$1/index.html" [L]',
 			'### STATICCACHE END'
 		);
 

@@ -342,7 +342,7 @@ class StaticCache extends Plugin
 		# TODO: Give the option for a custom interval
 		$ui->append( 'select', 'garbage_collect_int', 'staticcache__garbage_collect_int', _t( 'Garbage Collection Interval:' ),
 			array(
-				'none'		=> _t( 'Never' ),
+				'never'		=> _t( 'Never' ),
 				'hourly'	=> _t( 'Hourly' ),
 				'daily' 	=> _t( 'Daily' ),
 				'weekly' 	=> _t( 'Weekly' ),

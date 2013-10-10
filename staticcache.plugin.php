@@ -1,9 +1,11 @@
 <?php
-
 #namespace Habari;
 
 /**
  * @package staticcache
+ *
+ * @todo Fix ?v=1 caching in sub-sites
+ * @todo Fix non-caching of home page
  */
 
 /**
@@ -201,12 +203,13 @@ class StaticCache extends Plugin
 	 */
 	private static function clear_staticcache()
 	{
-		if ( Options::get('staticcache__cache_method') == 'htaccess' ) {
-			@array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/*/index.*" ) );
-			@array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/index.*" ) );
-			@array_map( 'unlink', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/index.*" ) );
-			@array_map( 'rmdir', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/**/*") );
-			@array_map( 'rmdir', glob( HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' ) . "/*") );
+		if ( Options::get( 'staticcache__cache_method' ) == 'htaccess' ) {
+			$cache_dir = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' );
+			@array_map( 'unlink', glob( $cache_dir . "/**/*/index.*" ) );
+			@array_map( 'unlink', glob( $cache_dir . "/**/index.*" ) );
+			@array_map( 'unlink', glob( $cache_dir . "/index.*" ) );
+			@array_map( 'rmdir', glob( $cache_dir . "/**/*") );
+			@array_map( 'rmdir', glob( $cache_dir . "/*") );
 		} 
 		else {
 			foreach ( Cache::get_group(self::GROUP_NAME) as $name => $data ) {
@@ -421,8 +424,7 @@ class StaticCache extends Plugin
 		if ( $ui->controls['garbage_collect_int'] != 'never' ) {
 			call_user_func_array( array( 'Crontab', 'add_' . $ui->controls['garbage_collect_int'] . '_cron' ), array( 'StaticCache Garbage Collection', array( 'StaticCache', 'garbage_collection' ), 'Clean up stale cache entries.' ) ); 
 		}
-		
-		
+				
 		Session::notice( _t( 'Options saved' ) );
 		return false;
 	}
@@ -700,22 +702,50 @@ class StaticCache extends Plugin
      * Clear cache when changing themes
      *
      */
-    public function action_theme_activated_any( )
+    public function action_theme_activated_any()
     {
     	self::clear_staticcache();
     }
 
 
     /**
-     * Perform the garbage collection
+     * Perform the garbage collection of mod_rewrite cache files
      *
      * This goes through the cache and removes all entries that have expired.
+     * An entry is considered expired when the configured number of seconds 
+     * has passed since the file was last modified.
+     *
+     * Thoughts: If you get to the point where every page has been cached to file,
+     * your Habari cronjobs, including the one that runs this, won't run.  
+     * 
+     * Need to come up with a reliable way of ensuring the cronjobs continue...
+     * 	- maybe don't cache the atom feed.  That might be enough to kick off cronjobs.
      *
      */
     public static function garbage_collection()
     {
+    	# Walk this site's cache files and check if expired.
+    	$cache_dir = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' );
+
+    	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $cache_dir ), RecursiveIteratorIterator::SELF_FIRST );
+    	# Skip "dot" files 
+		$iterator->setFlags( RecursiveDirectoryIterator::SKIP_DOTS ); 
+
+    	foreach ( $iterator as $path ) {
+    		if ( $path->getPathname() == $cache_dir ) continue;
+    		if ( $path->isDir() ) {		
+    			if ( time() - $path->getMTime() >= Options::get( 'staticcache__expire' ) ) {
+		    		# Remove the files in this dir
+		    		array_map( 'unlink', glob( $path->getPathname() . "/index.*" ) );
+		    		# Remove the parent dir
+		    		rmdir( $path->getPathname() );
+		    	}
+		    }
+    	}
+    	
     	return true;
     }
+
 }
 
 

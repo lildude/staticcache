@@ -4,8 +4,6 @@
 /**
  * @package staticcache
  *
- * @todo Fix ?v=1 caching in sub-sites
- * @todo Fix non-caching of home page
  */
 
 /**
@@ -173,7 +171,7 @@ class StaticCache extends Plugin
 	 */
 	public function action_block_content_staticcache( Block $block, Theme $theme )
 	{
-		if ( Options::get('staticcache__cache_method') == 'habari' ) {
+		if ( Options::get( 'staticcache__cache_method' ) == 'habari' ) {
 			$block->static_cache_average = sprintf( '%.4f', Cache::get(array(self::STATS_GROUP_NAME, 'avg')) );
 			$block->static_cache_pages = count(Cache::get_group(self::GROUP_NAME));
 
@@ -205,11 +203,7 @@ class StaticCache extends Plugin
 	{
 		if ( Options::get( 'staticcache__cache_method' ) == 'htaccess' ) {
 			$cache_dir = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' );
-			@array_map( 'unlink', glob( $cache_dir . "/**/*/index.*" ) );
-			@array_map( 'unlink', glob( $cache_dir . "/**/index.*" ) );
-			@array_map( 'unlink', glob( $cache_dir . "/index.*" ) );
-			@array_map( 'rmdir', glob( $cache_dir . "/**/*") );
-			@array_map( 'rmdir', glob( $cache_dir . "/*") );
+			self::rrmdir( $cache_dir );
 		} 
 		else {
 			foreach ( Cache::get_group(self::GROUP_NAME) as $name => $data ) {
@@ -258,7 +252,6 @@ class StaticCache extends Plugin
 				}
 			}
 		}
-
 	}
 
 	/**
@@ -307,7 +300,19 @@ class StaticCache extends Plugin
 	{
 		Options::set_group( 'staticcache', array( 'ignore_list' => '/admin,/feedback,/user,/ajax,/auth_ajax,?nocache,/auth,/cron',
 												  'cache_method' => 'habari',
-												  'expire' => 3600 ) );
+												  'expire' => self::EXPIRE ) );
+	}
+
+	/**
+	 * Remove dashboard module and empty cache when deactivating the plugin.
+	 *
+	 */
+	public function action_plugin_deactivation()
+	{
+		# Clear the cache
+		self::clear_staticcache();
+		# Remove any other instances of this cronjob
+		Crontab::delete_cronjob( 'StaticCache Garbage Collection' );
 	}
 
 	/**
@@ -726,26 +731,30 @@ class StaticCache extends Plugin
     {
     	# Walk this site's cache files and check if expired.
     	$cache_dir = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' );
-
-    	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $cache_dir ), RecursiveIteratorIterator::SELF_FIRST );
-    	# Skip "dot" files 
-		$iterator->setFlags( RecursiveDirectoryIterator::SKIP_DOTS ); 
-
-    	foreach ( $iterator as $path ) {
-    		if ( $path->getPathname() == $cache_dir ) continue;
-    		if ( $path->isDir() ) {		
-    			if ( time() - $path->getMTime() >= Options::get( 'staticcache__expire' ) ) {
-		    		# Remove the files in this dir
-		    		array_map( 'unlink', glob( $path->getPathname() . "/index.*" ) );
-		    		# Remove the parent dir
-		    		rmdir( $path->getPathname() );
-		    	}
-		    }
-    	}
-    	
+    	self::rrmdir( $cache_dir, Options::get( 'staticcache__expire' ) );
     	return true;
     }
 
+    private static function rrmdir( $dir, $expire = 0 )
+    {
+		if ( is_dir( $dir ) ) {
+			$objects = scandir( $dir );
+			foreach ( $objects as $object ) {
+				if ( $object != "." && $object != "..") {
+					if ( filetype( $dir . "/" . $object ) == "dir" ) {
+						self::rrmdir( $dir . "/" . $object ); 
+					}
+					else {
+						if ( time() - filemtime( $dir . "/" . $object ) >= $expire ) {
+							unlink( $dir . "/" . $object );
+						}
+					}
+				}
+			}
+			reset( $objects );
+			@rmdir( $dir );
+		}
+	}
 }
 
 

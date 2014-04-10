@@ -11,9 +11,6 @@
  */
 class StaticCache extends Plugin
 {
-	const VERSION = 0.3;
-	const API_VERSION = 004;
-
 	const GZ_COMPRESSION = 4;
 	const EXPIRE = 86400;
 	const EXPIRE_STATS = 604800;
@@ -204,7 +201,7 @@ class StaticCache extends Plugin
 		if ( Options::get( 'staticcache__cache_method' ) == 'htaccess' ) {
 			$cache_dir = HABARI_PATH . '/user/cache/' . self::GROUP_NAME . '/' . $_SERVER['SERVER_NAME'] . Site::get_path( 'habari' );
 			self::rrmdir( $cache_dir );
-		} 
+		}
 		else {
 			foreach ( Cache::get_group(self::GROUP_NAME) as $name => $data ) {
 				Cache::expire( array(self::GROUP_NAME, $name) );
@@ -390,7 +387,7 @@ class StaticCache extends Plugin
 		### Compare to calculated rules
 
 
-		### 
+		###
 		#$ui->append( 'submit', 'save', _t( 'Save', 'staticcache' ) );
 		#$ui->on_success( array( $this, 'update_htaccess' ) );
 		$ui->out();
@@ -427,9 +424,9 @@ class StaticCache extends Plugin
 		Crontab::delete_cronjob( 'StaticCache Garbage Collection' );
 		# Add our garbage collection cronjob
 		if ( $ui->controls['garbage_collect_int'] != 'never' ) {
-			call_user_func_array( array( 'Crontab', 'add_' . $ui->controls['garbage_collect_int'] . '_cron' ), array( 'StaticCache Garbage Collection', array( 'StaticCache', 'garbage_collection' ), 'Clean up stale cache entries.' ) ); 
+			call_user_func_array( array( 'Crontab', 'add_' . $ui->controls['garbage_collect_int'] . '_cron' ), array( 'StaticCache Garbage Collection', array( 'StaticCache', 'garbage_collection' ), 'Clean up stale cache entries.' ) );
 		}
-				
+
 		Session::notice( _t( 'Options saved' ) );
 		return false;
 	}
@@ -441,14 +438,6 @@ class StaticCache extends Plugin
 	public static function update_htaccess()
 	{
 
-	}
-
-	/**
-	 * Adds the plugin to the update check routine.
-	 */
-	public function action_update_check()
-	{
-		Update::add( 'StaticCache', '340fb135-e1a1-4351-a81c-dac2f1795169',  self::VERSION );
 	}
 
 	/**
@@ -612,7 +601,7 @@ class StaticCache extends Plugin
 				// Can't write to the file
 				return false;
 			}
-	
+
 		}
 		// Success!
 		return true;
@@ -681,7 +670,7 @@ class StaticCache extends Plugin
      *
      * We do this so we can easily determine if we're logged in or not as we
      * can't access the PHPSESSION vars.
-     * 
+     *
      */
     public function filter_user_authenticate( $user )
     {
@@ -722,12 +711,12 @@ class StaticCache extends Plugin
      * Perform the garbage collection of mod_rewrite cache files
      *
      * This goes through the cache and removes all entries that have expired.
-     * An entry is considered expired when the configured number of seconds 
+     * An entry is considered expired when the configured number of seconds
      * has passed since the file was last modified.
      *
      * Thoughts: If you get to the point where every page has been cached to file,
-     * your Habari cronjobs, including the one that runs this, won't run.  
-     * 
+     * your Habari cronjobs, including the one that runs this, won't run.
+     *
      * Need to come up with a reliable way of ensuring the cronjobs continue...
      * 	- maybe don't cache the atom feed.  That might be enough to kick off cronjobs.
      *
@@ -747,7 +736,7 @@ class StaticCache extends Plugin
 			foreach ( $objects as $object ) {
 				if ( $object != "." && $object != "..") {
 					if ( filetype( $dir . "/" . $object ) == "dir" ) {
-						self::rrmdir( $dir . "/" . $object ); 
+						self::rrmdir( $dir . "/" . $object );
 					}
 					else {
 						if ( time() - filemtime( $dir . "/" . $object ) >= $expire ) {
